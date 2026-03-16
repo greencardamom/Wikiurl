@@ -48,9 +48,7 @@ If you do not want to install Nim and compile the tool from source, you can down
 
 **Security Note:** To ensure transparency and trust, all pre-compiled binaries are built automatically with a GitHub feature 
 called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the 
-**Actions** tab at the top of this repository. Because this tool is fully open source, you are also encouraged to 
-independently review it. If you would like another opinion, feel free to copy the source code into an AI assistant (like 
-Claude, ChatGPT, or Gemini) and ask for a review.
+**Actions** tab at the top of this repository. 
 
 ### Prerequisites
 

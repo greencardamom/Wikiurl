@@ -50,6 +50,18 @@ If you do not want to install Nim and compile the tool from source, you can down
 called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the 
 **Actions** tab at the top of this repository. 
 
+### macOS Security Warning
+
+Because this is an open-source tool not signed with a paid Apple Developer certificate, macOS will flag the binary when you first download it and prevent it from running. 
+
+To clear the Apple quarantine flag and allow the tool to run, open your terminal and run this command on the downloaded file:
+
+`xattr -d com.apple.quarantine wikiurl-macos-amd64`
+
+If it still does not work try this:
+
+`codesign -s - --force ./wikiurl-macos-amd64`
+
 ### Prerequisites
 
 1. **Nim:** To compile from source you will need the [Nim compiler](https://nim-lang.org/install.html) installed.
@@ -178,3 +190,4 @@ cd testsuite
 ./testsuite.sh
 ```
 *(Note: Depending on your network connection and the size of the wikis, the `download` and `stream` engines may take a minute or two to complete).*
+

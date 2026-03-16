@@ -1,0 +1,71 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - '20**-**-**'    # Matches 2026-03-16
+      - '20**-**-**.*'  # Matches 2026-03-16.1, .2, etc.
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    
+    # The Matrix: This spins up 3 different VMs and assigns variables to each
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bin_ext: ""
+            release_name: wikiurl-linux-amd64
+          - os: macos-latest
+            bin_ext: ""
+            release_name: wikiurl-macos-amd64
+          - os: windows-latest
+            bin_ext: ".exe"
+            release_name: wikiurl-windows-amd64.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Nim
+        uses: alaviss/setup-nim@v2
+        with:
+          path: nim
+          version: 'latest'
+
+      # OS-Specific Dependency Installation
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient-dev
+
+      - name: Install macOS Dependencies
+        if: runner.os == 'macOS'
+        run: brew install mysql-client
+
+      # Cross-platform Nimble package installation
+      - name: Install Nimble packages
+        run: nimble install -y db_connector
+
+      - name: Build binary
+        run: nim c -d:release wikiurl.nim
+
+      # Rename the binary (Unix relies on 'mv', Windows PowerShell uses 'Rename-Item')
+      - name: Rename binary for release (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: mv wikiurl${{ matrix.bin_ext }} ${{ matrix.release_name }}
+
+      - name: Rename binary for release (Windows)
+        if: runner.os == 'Windows'
+        run: Rename-Item -Path "wikiurl${{ matrix.bin_ext }}" -NewName "${{ matrix.release_name }}"
+
+      # Upload to GitHub Releases
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.release_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

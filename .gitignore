@@ -1,0 +1,12 @@
+# Compiled binaries
+wikiurl
+wikiurl.exe
+wikiurl-linux-amd64
+wikiurl-macos-amd64
+
+# Nim cache directory
+nimcache/
+
+# Local configuration/secrets
+*.wikiurlrc
+replica.my.cnf

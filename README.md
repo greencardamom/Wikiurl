@@ -47,12 +47,10 @@ If you do not want to install Nim and compile the tool from source, you can down
    * `wikiurl-windows-amd64.exe` (Windows)
 
 **Security Note:** To ensure transparency and trust, all pre-compiled binaries are built automatically with a GitHub feature 
-called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's build environment and workflow 
-logs by clicking the **Actions** tab at the top of this repository. Because this tool is fully open source, you are 
-encouraged to independently review. If you would like a second opinion, feel free to copy the source code into an AI 
-assistant (like Claude, ChatGPT, or Gemini) and ask for a review.
-
-### Prerequisites
+called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the 
+**Actions** tab at the top of this repository. Because this tool is fully open source, you are also encouraged to 
+independently review it. If you would like another opinion, feel free to copy the source code into an AI assistant (like 
+Claude, ChatGPT, or Gemini) and ask for a review.
 
 ### Prerequisites
 

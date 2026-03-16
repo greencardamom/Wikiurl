@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import std/[os, parseopt, parsecfg, strutils, httpclient, json, uri, algorithm, streams, osproc], zip/gzipfiles, db_mysql
+import std/[os, parseopt, parsecfg, strutils, httpclient, json, uri, algorithm, streams, osproc], zip/gzipfiles, db_connector/db_mysql
 
 # For -m:sql 
 # sudo apt-get install libmysqlclient-dev

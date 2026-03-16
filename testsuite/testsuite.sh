@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Ensure we are operating in the testcases directory
-cd /home/greenc/projects/wikiurl/testcases || exit 1
+# Automatically set the working directory to the script's location
+cd "$(dirname "$0")" || exit 1
 
 WIKIURL="../wikiurl"
 WORKDIR="."

@@ -47,10 +47,10 @@ jobs:
 
       # Cross-platform Nimble package installation
       - name: Install Nimble packages
-        run: nimble install -y db_connector zip
+        run: nimble install -y cligen db_connector zip 
 
       - name: Build binary
-        run: nim c -d:release wikiurl.nim
+        run: nim c -d:ssl -d:release --outdir:. src/wikiurl.nim
 
       # Rename the binary (Unix relies on 'mv', Windows PowerShell uses 'Rename-Item')
       - name: Rename binary for release (Linux/macOS)

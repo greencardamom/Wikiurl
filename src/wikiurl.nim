@@ -50,11 +50,6 @@ type
     genTsv: bool
     genJson: bool
 
-# Forward declarations for our future engines
-proc runApiEngine(cfg: WikiUrlConfig)
-proc runDumpStreamEngine(cfg: WikiUrlConfig)
-proc runDumpDownloadEngine(cfg: WikiUrlConfig)
-proc runSqlEngine(cfg: WikiUrlConfig)
 
 # -------------------------------------------------------------------------
 # Configuration Merging Logic
@@ -274,7 +269,7 @@ proc runApiEngine(cfg: WikiUrlConfig) =
     stderr.writeLine("[Engine] Starting API Engine...")
     
   if cfg.domain == "ALL":
-    quit("Fatal Error: The API method cannot be used with '-d:ALL'. It would trigger millions of HTTP requests. Use -m:sql, -m:stream, or -m:download instead.")
+    quit("Fatal Error: The API method cannot be used with '-d:ALL'. It would trigger millions of HTTP requests. Use -m sql, -m stream, or -m download instead.")
 
   let agent = buildUserAgent(cfg)
   var client = newHttpClient(userAgent = agent)
@@ -343,9 +338,9 @@ proc runApiEngine(cfg: WikiUrlConfig) =
           # NDJSON Stream
           if cfg.genJson:
             let line = %*{
+              "title": title,
               "page_id": pageId,
               "namespace": ns,
-              "title": title,
               "domain": revDomain,
               "url": url
             }
@@ -421,9 +416,9 @@ proc processSqlChunk(sqlChunk: string, cfg: WikiUrlConfig, site: string, fTsv, f
 
           if cfg.genJson:
             let line = %*{
+              "title": "-",
               "page_id": parseInt(pageId),
               "namespace": -1,
-              "title": "-",
               "domain": cleanRevDomain,
               "url": fullUrl
             }
@@ -640,8 +635,9 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
 
       if cfg.domain == "ALL":
         # The URLS-ALL equivalent: Massive firehose dump with JOIN
-        let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE ? OR el.el_to_domain_index LIKE ?)" & nsFilter
-        for row in db.fastRows(sql(queryStr), "http://" & targetRevDomain & "%", "https://" & targetRevDomain & "%"):
+        let whereClause = if nsFilter != "": " WHERE 1=1" & nsFilter else: ""
+        let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from" & whereClause
+        for row in db.fastRows(sql(queryStr)):
           let pageId = row[0]
           let ns = row[1]
           let title = row[2].replace("_", " ")
@@ -659,9 +655,9 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
             
           if cfg.genJson:
             let line = %*{
+              "title": title,
               "page_id": parseInt(pageId),
               "namespace": parseInt(ns),
-              "title": title,
               "domain": cleanRevDomain,
               "url": fullUrl
             }
@@ -688,9 +684,9 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
             
           if cfg.genJson:
             let line = %*{
+              "title": title,
               "page_id": parseInt(pageId),
               "namespace": parseInt(ns),
-              "title": title,
               "domain": cleanRevDomain,
               "url": fullUrl
             }

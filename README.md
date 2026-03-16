@@ -77,7 +77,7 @@ Clone the repository and compile with the release flag for maximum performance:
 ```bash
 git clone [https://github.com/greencardamom/wikiurl.git](https://github.com/greencardamom/wikiurl.git)
 cd wikiurl
-nim c -d:release --outdir:. src/wikiurl.nim
+nim c -d:ssl -d:release --outdir:. src/wikiurl.nim
 ```
 
 ## Configuration

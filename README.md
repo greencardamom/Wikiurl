@@ -1,6 +1,8 @@
 # wikiurl
 
-`wikiurl` is a high-performance, multi-engine command-line tool for extracting URLs from Wikimedia projects. It allows you to search on specific domains across various wikis and output the results in multiple formats (TSV, JSONL, raw SQL, or article title list). At maximum you can download all URLS on 800+ wikis.
+`wikiurl` is a high-performance, multi-engine command-line tool for extracting URLs from Wikimedia projects. It allows you to search on specific domains across various wikis and output the results in multiple formats (TSV, JSONL, raw SQL, or article title list). At maximum, you could download all URLS across all 800+ wikis.
+
+The tool is particularly useful for tool, bot and report makers. It has advantages over [Quarry](https://toolhub.wikimedia.org/tools/wikimedia-quarry) by offering multiple extraction engines while avoiding SQL programming, web UI row limits, and query timeouts. It can be easily automated in shell scripts, seamlessly iterates across hundreds of wikis in a single command. It is a single binary for Linux, Mac and Windows.
 
 ## Example 
 
@@ -17,6 +19,8 @@ America's Army        0   com.cnn.www.                    http://www.cnn.com/US/
 Kryptos               0   com.cnn.www.                    http://www.cnn.com/2005/US/06/19/cracking.the.code/index.html
 Sartell, Minnesota    0   com.cnn.sportsillustrated.      http://sportsillustrated.cnn.com/football/nfl/players/3751/
 ```
+
+*Columns (tab-separated): Article Title | Namespace | Sortable Domain | URL*
 
 ## Features
 

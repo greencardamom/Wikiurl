@@ -50,19 +50,25 @@ assistant (like Claude, ChatGPT, or Gemini) and ask for a review.
 
 ### Prerequisites
 
-1. **Nim:** To compile from source you will need the Nim compiler installed. 
+### Prerequisites
+
+1. **Nim:** To compile from source you will need the [Nim compiler](https://nim-lang.org/install.html) installed.
 2. **Nim Libraries:** Install the required external packages using Nim's package manager:
    ```bash
    nimble install cligen zip
    ```
-   *Note: If you are running Nim version 2.0 or greater, you must also install the database connector:*
-   ```bash
-   nimble install db_connector
-   ```
-3. **MySQL Client Library:** Required for the `-m:sql` engine. On Debian/Ubuntu systems:
-   ```bash
-   sudo apt-get install libmysqlclient-dev
-   ```
+   *Note: If you are running Nim version 2.0 or greater, you must also install the database connector: `nimble install db_connector`*
+
+3. **MySQL Client Library:** Required only if you intend to compile and use the `-m sql` engine. 
+   * **Linux (Debian/Ubuntu):**
+     ```bash
+     sudo apt-get install libmysqlclient-dev
+     ```
+   * **macOS (via Homebrew):**
+     ```bash
+     brew install mysql-client
+     ```
+   * **Windows:** Nim requires `libmysql.dll` or `libmariadb.dll` in your system `PATH` (or placed next to the `wikiurl.exe` file). You can obtain this by downloading the [MariaDB C Connector](https://mariadb.com/downloads/connectors/connectors-data-access/c-connector/) or via MSYS2 (`pacman -S mingw-w64-x86_64-libmariadbclient`).
 
 ### Building from Source
 
@@ -78,7 +84,7 @@ nim c -d:release wikiurl.nim
 
 To comply with Wikimedia's User-Agent policies, `wikiurl` requires a configuration file to identify your bot/script. 
 
-Create a file at `~/.wikiurlrc` with the following minimum configuration:
+Create a file in your home directory (`~/.wikiurlrc` on Linux/macOS, or `C:\Users\<YourUsername>\.wikiurlrc` on Windows) with the following minimum configuration:
 
 ```ini
 [Identity]
@@ -90,7 +96,11 @@ email_file = "/path/to/a/text/file/containing/your/email.txt"
 # output_dir = "/tmp/wikiurl_output"
 ```
 
-*Note: The `email_file` should be a plain text file containing only your email address. This prevents hardcoding your email directly into configuration files. All values are surrounded by double-quote.
+*Note: The `email_file` should be a plain text file containing only your email address. This prevents hardcoding your email directly into configuration files. All values are surrounded by double-quote.*
+
+**Windows Path Note:** Because the values are double-quoted, you must either use forward slashes or double backslashes for your file paths so they are parsed correctly. 
+* Good: `"C:/Users/Name/email.txt"` or `"C:\\Users\\Name\\email.txt"`
+* Bad: `"C:\Users\Name\email.txt"`
 
 ### Toolforge SQL Configuration (Optional)
 If you intend to use the `-m:sql` method, add your replica credentials to the config. The file `replica.my.cnf` is available in your Toolforge shell account. You will also need passwordless-ssh setup on Toolforge.

@@ -14,13 +14,13 @@ Extract all CNN URLs from the Simple English Wikipedia (`simplewiki`) using the 
 
 **Output (`cnn.com.simplewiki.tsv`):**
 ```tsv
-The Blues Brothers    0   com.cnn.www.                    http://www.cnn.com/2005/SHOWBIZ/Movies/08/30/film.bluesbrothers.ap/index.html
-America's Army        0   com.cnn.www.                    http://www.cnn.com/US/9909/30/army.recruitment/#1
-Kryptos               0   com.cnn.www.                    http://www.cnn.com/2005/US/06/19/cracking.the.code/index.html
-Sartell, Minnesota    0   com.cnn.sportsillustrated.      http://sportsillustrated.cnn.com/football/nfl/players/3751/
+The Blues Brothers    123  0   com.cnn.www.                    http://www.cnn.com/2005/SHOWBIZ/Movies/08/30/film.bluesbrothers.ap/index.html
+America's Army        124  0   com.cnn.www.                    http://www.cnn.com/US/9909/30/army.recruitment/#1
+Kryptos               564  0   com.cnn.www.                    http://www.cnn.com/2005/US/06/19/cracking.the.code/index.html
+Sartell, Minnesota    987  0   com.cnn.sportsillustrated.      http://sportsillustrated.cnn.com/football/nfl/players/3751/
 ```
 
-*Columns (tab-separated): Article Title | Namespace | Sortable Domain | URL*
+*Columns (tab-separated): Article Title | Page ID | Namespace | Sortable Domain | URL*
 
 ## Features
 

@@ -286,7 +286,7 @@ proc runApiEngine(cfg: WikiUrlConfig) =
       stderr.writeLine("[API] Processing site: " & site)
 
     # Setup the output file routes
-    let baseName = cfg.outDir / (cfg.domain & "." & site)
+    let baseName = cfg.outDir / (cfg.domain & "." & site & ".api")
     var fJson, fTsv, fArt, fRaw: File
     
     if cfg.genJson: fJson = open(baseName & ".jsonl", fmWrite)
@@ -351,9 +351,9 @@ proc runApiEngine(cfg: WikiUrlConfig) =
             }
             fJson.writeLine($line)
           
-          # Custom TSV Stream: <title> <tab> <ns> <tab> <revDomain> <tab> <url>
+          # Standard Schema: <Title> \t <PageId> \t <Namespace> \t <Domain> \t <URL>
           if cfg.genTsv:
-            fTsv.writeLine(title & "\t" & $ns & "\t" & revDomain & "\t" & url)
+            fTsv.writeLine(title & "\t" & $pageId & "\t" & $ns & "\t" & revDomain & "\t" & url)
 
           if cfg.genArticles:
             fArt.writeLine(title)
@@ -415,16 +415,15 @@ proc processSqlChunk(sqlChunk: string, cfg: WikiUrlConfig, site: string, fTsv, f
           if cfg.genRaw:
             fRaw.writeLine(tupleStr)
 
-          # Maintain 4 columns: <PageId (as Title)> <tab> <"-" (as Namespace)> <tab> <revDomain> <tab> <url>
+          # Offline Schema: <Title "-"> \t <PageId> \t <Namespace "-"> \t <Domain> \t <URL>
           if cfg.genTsv:
-            fTsv.writeLine(pageId & "\t-\t" & cleanRevDomain & "\t" & fullUrl)
+            fTsv.writeLine("-\t" & pageId & "\t-\t" & cleanRevDomain & "\t" & fullUrl)
 
           if cfg.genJson:
-            # We use 0 or -1 as a null proxy for the missing namespace in JSON depending on preference, 
-            # or just leave it out. We will use -1 here to indicate "unknown".
             let line = %*{
               "page_id": parseInt(pageId),
               "namespace": -1,
+              "title": "-",
               "domain": cleanRevDomain,
               "url": fullUrl
             }
@@ -641,24 +640,26 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
 
       if cfg.domain == "ALL":
         # The URLS-ALL equivalent: Massive firehose dump with JOIN
-        let queryStr = "SELECT p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE ? OR el.el_to_domain_index LIKE ?)" & nsFilter
+        let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE ? OR el.el_to_domain_index LIKE ?)" & nsFilter
         for row in db.fastRows(sql(queryStr), "http://" & targetRevDomain & "%", "https://" & targetRevDomain & "%"):
-          let ns = row[0]
-          let title = row[1].replace("_", " ")
-          let rawRevDomain = row[2]
+          let pageId = row[0]
+          let ns = row[1]
+          let title = row[2].replace("_", " ")
+          let rawRevDomain = row[3]
           let properDomain = unreverseDomain(rawRevDomain)
           let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
-          let fullUrl = properDomain & row[3]
+          let fullUrl = properDomain & row[4]
           
           if cfg.regex != "":
             if fullUrl.find(cfg.compiledRegex) == -1:
               continue
               
           if cfg.genTsv:
-            fTsv.writeLine(title & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
+            fTsv.writeLine(title & "\t" & pageId & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
             
           if cfg.genJson:
             let line = %*{
+              "page_id": parseInt(pageId),
               "namespace": parseInt(ns),
               "title": title,
               "domain": cleanRevDomain,
@@ -668,24 +669,26 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
             
       else:
         # The specific domain search with JOIN
-        let queryStr = "SELECT p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE 'http://" & targetRevDomain & "%' OR el.el_to_domain_index LIKE 'https://" & targetRevDomain & "%')" & nsFilter
+        let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE 'http://" & targetRevDomain & "%' OR el.el_to_domain_index LIKE 'https://" & targetRevDomain & "%')" & nsFilter
         for row in db.fastRows(sql(queryStr)):
-          let ns = row[0]
-          let title = row[1].replace("_", " ")
-          let rawRevDomain = row[2]
+          let pageId = row[0]
+          let ns = row[1]
+          let title = row[2].replace("_", " ")
+          let rawRevDomain = row[3]
           let properDomain = unreverseDomain(rawRevDomain)
           let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
-          let fullUrl = properDomain & row[3]
+          let fullUrl = properDomain & row[4]
           
           if cfg.regex != "":
             if fullUrl.find(cfg.compiledRegex) == -1:
               continue
               
           if cfg.genTsv:
-            fTsv.writeLine(title & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
+            fTsv.writeLine(title & "\t" & pageId & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
             
           if cfg.genJson:
             let line = %*{
+              "page_id": parseInt(pageId),
               "namespace": parseInt(ns),
               "title": title,
               "domain": cleanRevDomain,

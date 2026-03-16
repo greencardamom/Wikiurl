@@ -9,7 +9,7 @@ The tool is particularly useful for tool, bot and report makers. It has advantag
 Extract all CNN URLs from the Simple English Wikipedia (`simplewiki`) using the live API engine and output in TSV format:
 
 ```bash
-./wikiurl -d:cnn.com -s:simplewiki -m:api --genTsv:true
+./wikiurl -d cnn.com -s simplewiki -m api --genTsv
 ```
 
 **Output (`cnn.com.simplewiki.tsv`):**
@@ -103,7 +103,7 @@ email_file = "/path/to/a/text/file/containing/your/email.txt"
 * Bad: `"C:\Users\Name\email.txt"`
 
 ### Toolforge SQL Configuration (Optional)
-If you intend to use the `-m:sql` method, add your replica credentials to the config. The file `replica.my.cnf` is available in your Toolforge shell account. You will also need passwordless-ssh setup on Toolforge.
+If you intend to use the `-m sql` method, add your replica credentials to the config. The file `replica.my.cnf` is available in your Toolforge shell account. You will also need passwordless-ssh setup on Toolforge.
 
 ```ini
 [Authentication]
@@ -148,21 +148,33 @@ Options:
 | **Download** (`download`) | Medium | Up to 30 days | Open | No | Resilient against network drops; great if you need to run multiple passes over the same dump. | Requires heavy disk space (GBs for large wikis); data is delayed; no titles/namespaces. | curl and gzip |
 | **SQL** (`sql`) | High | Hours old | Authentication | Yes | The absolute fastest method; provides full metadata (titles/namespaces) with real-time replica data. | Requires approved Wikimedia Toolforge access and SSH key configuration. | ssh |
 
-**Note for Windows Users**: The API (`-m:api`), Download (`-m:download`), and SQL (`-m:sql`) engines work natively on Windows (the SQL engine utilizes standard Windows 10/11 OpenSSH). However, the Stream engine (`-m:stream`) relies on the UNIX `gzip` utility via shell pipelines. To use the Stream method on Windows, you must either have `gzip` installed in your system PATH (e.g., via Git Bash) or run `wikiurl` via WSL (Windows Subsystem for Linux).
+**Note for Windows Users**: The API (`-m api`), Download (`-m download`), and SQL (`-m sql`) engines work natively on Windows (the SQL engine utilizes standard Windows 10/11 OpenSSH). However, the Stream engine (`-m stream`) relies on the UNIX `gzip` utility via shell pipelines. To use the Stream method on Windows, you must either have `gzip` installed in your system PATH (e.g., via Git Bash) or run `wikiurl` via WSL (Windows Subsystem for Linux).
 
 ### Examples
 
 **Run a pure pipeline stream on your local machine:**
 ```bash
-./wikiurl -d:cnn.com -s:simplewiki -m:stream --progress --genTsv:true
+./wikiurl -d cnn.com -s simplewiki -m stream --progress --genTsv
 ```
 
 **Run an indexed query targeting specific namespaces and matching a regex (Toolforge):**
 ```bash
-./wikiurl -d:cnn.com -s:simplewiki -m:sql -n:0,6 -r:"^https://" --progress --genTsv:true
+./wikiurl -d cnn.com -s simplewiki -m sql -n 0,6 -r "^https://" --progress --genTsv
 ```
 
 **Dump all links from sites listed in a file using the auto-detected method:**
 ```bash
-./wikiurl -d:ALL -s:mysites.txt --progress --genTsv:true
+./wikiurl -d ALL -s mysites.txt --progress --genTsv
 ```
+
+## Testing
+
+`wikiurl` includes a comprehensive test suite to validate the integrity of all four extraction engines and their output formats (TSV, JSONL, RAW, Articles). It runs parallel extractions across different domains and outputs line counts to ensure data consistency across the engines.
+
+To execute the test suite:
+
+```bash
+cd testsuite
+./testsuite.sh
+```
+*(Note: Depending on your network connection and the size of the wikis, the `download` and `stream` engines may take a minute or two to complete).*

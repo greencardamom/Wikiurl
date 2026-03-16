@@ -47,7 +47,7 @@ jobs:
 
       # Cross-platform Nimble package installation
       - name: Install Nimble packages
-        run: nimble install -y db_connector
+        run: nimble install -y db_connector zip
 
       - name: Build binary
         run: nim c -d:release wikiurl.nim

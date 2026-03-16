@@ -14,10 +14,15 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import std/[os, parseopt, parsecfg, strutils, httpclient, json, uri, algorithm, streams, osproc], zip/gzipfiles, db_connector/db_mysql
+import std/[os, parsecfg, strutils, httpclient, json, uri, algorithm, streams, osproc, re], zip/gzipfiles
 
-# For -m:sql 
-# sudo apt-get install libmysqlclient-dev
+# Handle the standard library split introduced in Nim 2.0
+when NimMajor >= 2:
+  import db_connector/db_mysql
+else:
+  import db_mysql
+
+import cligen
 
 type
   OutputMethod = enum
@@ -31,9 +36,14 @@ type
     outDir: string
     domain: string
     sites: seq[string]
+    ns: string
+    nsList: seq[string]
+    regex: string
+    compiledRegex: Regex
     runMethod: OutputMethod
     showProgress: bool
     verbose: bool
+    generateAllWikis: bool
     # File generation toggles
     genRaw: bool
     genArticles: bool
@@ -77,116 +87,6 @@ proc loadConfigFile(filePath: string, cfg: var WikiUrlConfig) =
   if dict.getSectionValue("Global", "generate_json") != "":
     cfg.genJson = parseBool(dict.getSectionValue("Global", "generate_json"))
 
-proc printHelp() =
-  echo "\n  wikiurl - list page names and URLs that contain a domain\n"
-  echo "    -d <domain>   (required) Domain to search for eg. cnn.com (Use 'ALL' for all domains)"
-  echo "    -s <site>     (required) Site codes [comma separated] OR path to a text file list (e.g. allwikis.txt)"
-  echo "    -m <method>   (optional) Extraction method to use. Auto-detects if omitted. Options:"
-  echo "                             api      - Live Web API (slow, good for small scrapes)"
-  echo "                             download - Offline Dump with disk spooling (safe, low RAM)"
-  echo "                             stream   - Offline Dump via Unix pipeline (fast, zero disk)"
-  echo "                             sql      - Toolforge MariaDB replica (fastest, requires tunnel or grid)"
-  echo "    -n <ns>       (optional) Namespace(s) to target [comma separated] eg. '0,6'. Default is all."
-  echo "                             Note: Ignored by stream/download methods (offline dumps lack namespaces)"
-  echo "    -r <regex>    (optional) Only report URLs that match the given regex"
-  echo "    -c <config>   (optional) Path to a custom job config file to override ~/.wikiurlrc"
-  echo "    -w <dir>      (optional) Working directory for output. Default is CWD."
-  echo "    --progress    (optional) Print status messages to stderr"
-  echo "    --verbose     (optional) Print detailed HTTP/network debug information"
-  echo "    --genTsv:true      (optional) Generate a .tsv file"
-  echo "    --genJson:true     (optional) Generate a .jsonl file"
-  echo "    --genArticles:true (optional) Generate a .articles file (List of page titles, API/SQL only)"
-  echo "    --genRaw:true      (optional) Keep raw SQL/API output file"
-  echo ""
-  echo "    Examples:"
-  echo "      Run pure pipeline stream on your local machine:"
-  echo "         ./wikiurl -d:cnn.com -s:simplewiki -m:stream --progress --genTsv:true"
-  echo "      Run indexed query targeting specific namespaces and matching a regex:"
-  echo "         ./wikiurl -d:cnn.com -s:simplewiki -m:sql -n:0,6 -r:\"^https://\" --progress --genTsv:true"
-  echo "      Dump all links from sites listed in a file using auto-detected method:"
-  echo "         ./wikiurl -d:ALL -s:mysites.txt --progress --genTsv:true"
-  echo ""
-
-# -------------------------------------------------------------------------
-# CLI Parsing & Initialization
-# -------------------------------------------------------------------------
-
-proc initConfig(): WikiUrlConfig =
-  # Intercept empty commands immediately
-  if paramCount() == 0:
-    printHelp()
-    quit(0)
-
-  # 1. Initialize with bare minimum defaults
-  result = WikiUrlConfig(
-    runMethod: methodAuto,
-    outDir: getCurrentDir(),
-    genRaw: false,
-    genArticles: false,
-    genTsv: false,
-    genJson: false,
-    showProgress: false,
-    verbose: false
-  )
-
-  # 2. Load Tier 1: Global Dotfile (~/.wikiurlrc)
-  let dotFile = getHomeDir() / ".wikiurlrc"
-  loadConfigFile(dotFile, result)
-
-  # Prepare to capture CLI args
-  var customConfFile = ""
-  var cliParams = initOptParser()
-
-  # First pass to find if a custom job.conf was passed via -c
-  for kind, key, val in cliParams.getopt():
-    if kind == cmdLongOption or kind == cmdShortOption:
-      if key == "c" or key == "config":
-        customConfFile = val
-        break
-  
-  # 3. Load Tier 2: Job Config (if provided)
-  if customConfFile != "":
-    loadConfigFile(customConfFile, result)
-
-  # 4. Load Tier 3: CLI Flags (Overrides everything)
-  cliParams = initOptParser() # Reset parser for full run
-  for kind, key, val in cliParams.getopt():
-    case kind
-    of cmdLongOption, cmdShortOption:
-      case key
-      of "d", "domain": result.domain = val
-      of "s", "site":
-        result.sites = @[]
-        if fileExists(val):
-          for line in lines(val):
-            let cleanLine = line.strip()
-            if cleanLine != "": result.sites.add(cleanLine)
-        else:
-          for s in val.split(','):
-            let cleanS = s.strip()
-            if cleanS != "": result.sites.add(cleanS)
-      of "m", "method":
-        case val.toLowerAscii()
-        of "api": result.runMethod = methodApi
-        of "stream": result.runMethod = methodDumpStream
-        of "download": result.runMethod = methodDumpDownload
-        of "sql": result.runMethod = methodSql
-        else: quit("Error: Unknown method '" & val & "'")
-      of "w", "workdir": result.outDir = val
-      of "progress": result.showProgress = true
-      of "verbose": result.verbose = true
-      of "c", "config": discard # Already handled
-      of "genRaw": result.genRaw = parseBool(val)
-      of "genArticles": result.genArticles = parseBool(val)
-      of "genTsv": result.genTsv = parseBool(val)
-      of "genJson": result.genJson = parseBool(val)
-      else:
-        quit("Error: Unknown option '--" & key & "'")
-    of cmdArgument:
-      discard
-    of cmdEnd:
-      break
-
 proc validateConfig(cfg: WikiUrlConfig) =
   if cfg.domain == "":
     quit("Error: Target domain (-d) is required.")
@@ -198,6 +98,48 @@ proc validateConfig(cfg: WikiUrlConfig) =
 # -------------------------------------------------------------------------
 # Shared Engine Helpers
 # -------------------------------------------------------------------------
+
+proc buildUserAgent(cfg: WikiUrlConfig): string =
+  # Safely read the email from the secrets file
+  var email = "unknown@example.com"
+  if fileExists(cfg.emailFile):
+    email = readFile(cfg.emailFile).strip()
+  else:
+    quit("Error: Could not read email file at " & cfg.emailFile)
+    
+  # Format: wikiurl/1.0 (https://github.com/greencardamom/wikiurl; User:GreenC; mailto:email@example.com)
+  return "wikiurl/1.0 (https://github.com/greencardamom/wikiurl; " & cfg.userId & "; mailto:" & email & ")"
+
+proc generateAllWikisTxt(cfg: WikiUrlConfig) =
+  let outPath = cfg.outDir / "allwikis.txt"
+  if cfg.showProgress:
+    stderr.writeLine("[Setup] Fetching active wiki list from WMF NOC to " & outPath & " ...")
+  
+  let agent = buildUserAgent(cfg)
+  var client = newHttpClient(userAgent = agent)
+  defer: client.close()
+  
+  try:
+    let allDb = client.getContent("https://noc.wikimedia.org/conf/dblists/all.dblist").splitLines()
+    let closedDb = client.getContent("https://noc.wikimedia.org/conf/dblists/closed.dblist").splitLines()
+    let privateDb = client.getContent("https://noc.wikimedia.org/conf/dblists/private.dblist").splitLines()
+    
+    var activeWikis: seq[string] = @[]
+    for db in allDb:
+      let cleanDb = db.strip()
+      if cleanDb != "" and cleanDb notin closedDb and cleanDb notin privateDb:
+        activeWikis.add(cleanDb)
+        
+    var f = open(outPath, fmWrite)
+    for w in activeWikis:
+      f.writeLine(w)
+    f.close()
+    
+    if cfg.showProgress:
+      stderr.writeLine("[Setup] Successfully created allwikis.txt with " & $activeWikis.len & " active wikis.")
+  except CatchableError:
+    let errMsg = getCurrentExceptionMsg()
+    quit("Fatal Error: Could not generate allwikis.txt via HTTP. " & errMsg)
 
 proc fetchWithRetries(client: HttpClient, baseUrl: string, cfg: WikiUrlConfig, maxRetries: int = 5): JsonNode =
   var attempt = 0
@@ -257,17 +199,6 @@ proc fetchWithRetries(client: HttpClient, baseUrl: string, cfg: WikiUrlConfig, m
   # If we exhausted all 5 retries, gracefully abort instead of crashing
   quit("Fatal Error: WMF API completely exhausted after " & $maxRetries & " attempts. The servers are likely overloaded. Try again later.")
 
-proc buildUserAgent(cfg: WikiUrlConfig): string =
-  # Safely read the email from the secrets file
-  var email = "unknown@example.com"
-  if fileExists(cfg.emailFile):
-    email = readFile(cfg.emailFile).strip()
-  else:
-    quit("Error: Could not read email file at " & cfg.emailFile)
-    
-  # Format: wikiurl/1.0 (https://github.com/greencardamom/wikiurl; User:GreenC; mailto:email@example.com)
-  return "wikiurl/1.0 (https://github.com/greencardamom/wikiurl; " & cfg.userId & "; mailto:" & email & ")"
-
 proc reverseDomain(urlStr: string): string =
   # Converts "https://www.archive.today/foo" to "today.archive.www."
   try:
@@ -277,6 +208,15 @@ proc reverseDomain(urlStr: string): string =
     return parts.join(".") & "."
   except:
     return ""
+
+proc stripSchemeFromIndex(elIndex: string): string =
+  # Removes the "http://" or "https://" from the raw database tuple strings
+  let schemeIdx = elIndex.find("://")
+  if schemeIdx != -1:
+    return elIndex[schemeIdx + 3 .. ^1]
+  elif elIndex.startsWith("//"):
+    return elIndex[2 .. ^1]
+  return elIndex
 
 proc unreverseDomain(elIndex: string): string =
   # Converts "http://com.cnn.arabic." cleanly back to "http://arabic.cnn.com"
@@ -364,7 +304,11 @@ proc runApiEngine(cfg: WikiUrlConfig) =
     var eucontinue = ""
     # eulimit=max automatically uses 500 for regular users, 5000 for bot flags
     let fqdn = dbNameToHost(site)
-    let apiUrl = "https://" & fqdn & "/w/api.php?action=query&list=exturlusage&euquery=" & cfg.domain & "&euprop=title|url|ids&format=json&eulimit=max"
+    var apiUrl = "https://" & fqdn & "/w/api.php?action=query&list=exturlusage&euquery=" & cfg.domain & "&euprop=title|url|ids&format=json&eulimit=max"
+
+    # API handles namespace filtering natively via parameter
+    if cfg.nsList.len > 0:
+      apiUrl &= "&eunamespace=" & cfg.nsList.join("|")
 
     while true:
       var reqUrl = apiUrl
@@ -388,6 +332,12 @@ proc runApiEngine(cfg: WikiUrlConfig) =
           let ns = item["ns"].getInt()
           let title = item["title"].getStr()
           let url = item["url"].getStr()
+          
+          # Regex Filter
+          if cfg.regex != "":
+            if url.find(cfg.compiledRegex) == -1:
+              continue
+
           let revDomain = reverseDomain(url)
 
           # NDJSON Stream
@@ -401,11 +351,10 @@ proc runApiEngine(cfg: WikiUrlConfig) =
             }
             fJson.writeLine($line)
           
-          # Custom TSV Stream (Tab separated) includes NS and Title
+          # Custom TSV Stream: <title> <tab> <ns> <tab> <revDomain> <tab> <url>
           if cfg.genTsv:
-            fTsv.writeLine($ns & "\t" & title & "\t" & revDomain & "\t" & url)
+            fTsv.writeLine(title & "\t" & $ns & "\t" & revDomain & "\t" & url)
 
-          # Articles Stream (We can add namespace filtering from the config here later)
           if cfg.genArticles:
             fArt.writeLine(title)
 
@@ -421,9 +370,8 @@ proc runApiEngine(cfg: WikiUrlConfig) =
 # -------------------------------------------------------------------------
 
 proc processSqlChunk(sqlChunk: string, cfg: WikiUrlConfig, site: string, fTsv, fJson, fRaw: File) =
-  # We are looking for strings like: (1234,0,'com.cnn.www.','http://www.cnn.com/')
-  # Because schemas change, we isolate the tuples by their parentheses
-
+  # Schema: (el_id, el_from, el_to_domain_index, el_to_path)
+  
   let targetRevDomain = reverseDomainArg(cfg.domain)
   var currentPos = 0
   
@@ -442,27 +390,43 @@ proc processSqlChunk(sqlChunk: string, cfg: WikiUrlConfig, site: string, fTsv, f
     if cfg.domain != "ALL" and cfg.domain notin tupleStr and targetRevDomain notin tupleStr:
       continue
 
-    # Split the tuple. Expected: id, namespace, reversed_domain, path
-    var parts = tupleStr.split(',')
+    # Split the tuple. We use maxsplit=3 so if the URL contains commas it won't break the array
+    var parts = tupleStr.split(',', maxsplit = 3)
     if parts.len >= 4:
       try:
-        let pageId = parts[0].strip()
+        let elId = parts[0].strip()
+        let pageId = parts[1].strip() # This is the actual page ID (el_from)
         let revDomain = parts[2].strip().replace("'", "")
-        let url = parts[3].strip().replace("'", "")
+        let urlPath = parts[3].strip().replace("'", "")
+
+        # Offline dumps lack namespace data entirely (it requires joining the `page` table).
+        # We completely ignore cfg.nsList here to prevent breaking the dump engine.
 
         if cfg.domain == "ALL" or targetRevDomain in revDomain:
+          let properDomain = unreverseDomain(revDomain)
+          let cleanRevDomain = stripSchemeFromIndex(revDomain)
+          let fullUrl = properDomain & urlPath
+
+          # Regex Filter
+          if cfg.regex != "":
+            if fullUrl.find(cfg.compiledRegex) == -1:
+              continue
+
           if cfg.genRaw:
             fRaw.writeLine(tupleStr)
 
-          # Offline dumps don't have titles, so we only print ID, Domain, and URL
+          # Maintain 4 columns: <PageId (as Title)> <tab> <"-" (as Namespace)> <tab> <revDomain> <tab> <url>
           if cfg.genTsv:
-            fTsv.writeLine(pageId & "\t" & revDomain & "\t" & url)
+            fTsv.writeLine(pageId & "\t-\t" & cleanRevDomain & "\t" & fullUrl)
 
           if cfg.genJson:
+            # We use 0 or -1 as a null proxy for the missing namespace in JSON depending on preference, 
+            # or just leave it out. We will use -1 here to indicate "unknown".
             let line = %*{
               "page_id": parseInt(pageId),
-              "domain": revDomain,
-              "url": url
+              "namespace": -1,
+              "domain": cleanRevDomain,
+              "url": fullUrl
             }
             fJson.writeLine($line)
             
@@ -599,6 +563,7 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
 
   let creds = getReplicaCreds(cfg)
   let targetRevDomain = reverseDomainArg(cfg.domain)
+  var currentLocalPort = 4711 # Increment per loop to avoid TIME_WAIT collisions
 
   for site in cfg.sites:
     if cfg.showProgress:
@@ -606,24 +571,41 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
 
     let dbHost = site & ".analytics.db.svc.wikimedia.cloud"
     let dbName = site & "_p"
-    
-    # Mirroring the findlinks.awk socket logic
-    let tunnelSock = getTempDir() / ("wikiurl_tunnel_" & site & ".sock")
-    let localPort = "4711"
+    let localPort = $currentLocalPort
+    currentLocalPort += 1
 
-    # 1. Start SSH Tunnel (-f puts it in background, -M creates control socket)
-    let sshStartCmd = "ssh -N -f -M -S " & tunnelSock & " -L " & localPort & ":" & dbHost & ":3306 login.toolforge.org"
-    
-    if execCmd(sshStartCmd) != 0:
-      stderr.writeLine("[SQL] Failed to establish SSH tunnel. Ensure your SSH config/keys are set up for login.toolforge.org")
-      continue
+    when defined(windows):
+      # Native Windows OpenSSH lacks ControlMaster multiplexing support
+      # We launch it as a tracked background process instead
+      var sshProc: Process
+      try:
+        sshProc = startProcess("ssh", args = ["-N", "-L", localPort & ":" & dbHost & ":3306", "login.toolforge.org"], options = {poUsePath})
+        if cfg.showProgress:
+          stderr.writeLine("[SQL] Waiting 3 seconds for Windows SSH tunnel to establish...")
+        sleep(3000)
+      except CatchableError:
+        stderr.writeLine("[SQL] Failed to launch SSH process. Is OpenSSH installed?")
+        continue
+        
+      defer:
+        if cfg.showProgress: stderr.writeLine("[SQL] Closing SSH tunnel...")
+        if sshProc != nil:
+          sshProc.terminate()
+          sshProc.close()
+    else:
+      # POSIX (Linux/macOS/WSL) uses reliable SSH multiplexing sockets
+      let tunnelSock = getTempDir() / ("wikiurl_tunnel_" & site & ".sock")
+      let sshStartCmd = "ssh -N -f -M -S " & tunnelSock & " -L " & localPort & ":" & dbHost & ":3306 login.toolforge.org"
+      
+      if execCmd(sshStartCmd) != 0:
+        stderr.writeLine("[SQL] Failed to establish SSH tunnel. Ensure your SSH config/keys are set up for login.toolforge.org")
+        continue
 
-    # 2. Guarantee the tunnel is killed when we leave this block, even if the database crashes
-    defer:
-      if cfg.showProgress: stderr.writeLine("[SQL] Closing SSH tunnel...")
-      discard execCmd("ssh -S " & tunnelSock & " -O exit login.toolforge.org > /dev/null 2>&1")
+      defer:
+        if cfg.showProgress: stderr.writeLine("[SQL] Closing SSH tunnel...")
+        discard execCmd("ssh -S " & tunnelSock & " -O exit login.toolforge.org > /dev/null 2>&1")
 
-    # 3. Connect natively through the tunnel to the replica
+    # Connect natively through the tunnel to the replica
     var db: DbConn
     try:
       # Nim's db_mysql allows host:port format in the connection string
@@ -653,44 +635,60 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
       stderr.writeLine("[SQL] Executing indexed query for " & cfg.domain & "...")
 
     try:
+      var nsFilter = ""
+      if cfg.nsList.len > 0:
+        nsFilter = " AND p.page_namespace IN (" & cfg.nsList.join(",") & ")"
+
       if cfg.domain == "ALL":
         # The URLS-ALL equivalent: Massive firehose dump with JOIN
-        let queryStr = "SELECT p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE el.el_to_domain_index LIKE ? OR el.el_to_domain_index LIKE ?"
+        let queryStr = "SELECT p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE ? OR el.el_to_domain_index LIKE ?)" & nsFilter
         for row in db.fastRows(sql(queryStr), "http://" & targetRevDomain & "%", "https://" & targetRevDomain & "%"):
           let ns = row[0]
-          let title = row[1]
-          let properDomain = unreverseDomain(row[2])
+          let title = row[1].replace("_", " ")
+          let rawRevDomain = row[2]
+          let properDomain = unreverseDomain(rawRevDomain)
+          let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
           let fullUrl = properDomain & row[3]
           
+          if cfg.regex != "":
+            if fullUrl.find(cfg.compiledRegex) == -1:
+              continue
+              
           if cfg.genTsv:
-            fTsv.writeLine(ns & "\t" & title & "\t" & properDomain & "\t" & fullUrl)
+            fTsv.writeLine(title & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
             
           if cfg.genJson:
             let line = %*{
               "namespace": parseInt(ns),
               "title": title,
-              "domain": properDomain,
+              "domain": cleanRevDomain,
               "url": fullUrl
             }
             fJson.writeLine($line)
             
       else:
         # The specific domain search with JOIN
-        let queryStr = "SELECT p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE el.el_to_domain_index LIKE 'http://" & targetRevDomain & "%' OR el.el_to_domain_index LIKE 'https://" & targetRevDomain & "%'"
+        let queryStr = "SELECT p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE 'http://" & targetRevDomain & "%' OR el.el_to_domain_index LIKE 'https://" & targetRevDomain & "%')" & nsFilter
         for row in db.fastRows(sql(queryStr)):
           let ns = row[0]
-          let title = row[1]
-          let properDomain = unreverseDomain(row[2])
+          let title = row[1].replace("_", " ")
+          let rawRevDomain = row[2]
+          let properDomain = unreverseDomain(rawRevDomain)
+          let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
           let fullUrl = properDomain & row[3]
           
+          if cfg.regex != "":
+            if fullUrl.find(cfg.compiledRegex) == -1:
+              continue
+              
           if cfg.genTsv:
-            fTsv.writeLine(ns & "\t" & title & "\t" & properDomain & "\t" & fullUrl)
+            fTsv.writeLine(title & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
             
           if cfg.genJson:
             let line = %*{
               "namespace": parseInt(ns),
               "title": title,
-              "domain": properDomain,
+              "domain": cleanRevDomain,
               "url": fullUrl
             }
             fJson.writeLine($line)
@@ -706,33 +704,146 @@ proc runSqlEngine(cfg: WikiUrlConfig) =
 # Main Execution Routing
 # -------------------------------------------------------------------------
 
-proc main() =
-  var config = initConfig()
-  validateConfig(config)
+proc executeWikiUrl(domain: string = "", site: string = "", methodOpt: string = "", 
+                    ns: string = "", regex: string = "", config: string = "", 
+                    workdir: string = "", allwikis: bool = false, progress: bool = false, 
+                    verbose: bool = false, genTsv: bool = false, genJson: bool = false, 
+                    genArticles: bool = false, genRaw: bool = false) =
+                    
+  var cfg = WikiUrlConfig(
+    runMethod: methodAuto,
+    outDir: getCurrentDir(),
+    genRaw: false,
+    genArticles: false,
+    genTsv: false,
+    genJson: false,
+    showProgress: false,
+    verbose: false,
+    generateAllWikis: false
+  )
+
+  # Load Tier 1
+  let dotFile = getHomeDir() / ".wikiurlrc"
+  loadConfigFile(dotFile, cfg)
+
+  # Load Tier 2
+  if config != "":
+    loadConfigFile(config, cfg)
+
+  # Load Tier 3 (CLI Args overrides)
+  if domain != "": cfg.domain = domain
+  if workdir != "": cfg.outDir = workdir
+  
+  if regex != "": 
+    cfg.regex = regex
+    try:
+      cfg.compiledRegex = re(regex)
+    except CatchableError:
+      quit("Error: Invalid regular expression provided: " & regex)
+
+  if ns != "": 
+    cfg.ns = ns
+    for n in ns.split(','):
+      let cleanN = n.strip()
+      if cleanN != "": cfg.nsList.add(cleanN)
+
+  if site != "":
+    cfg.sites = @[]
+    if site == "ALL":
+      cfg.sites.add("ALL")
+    elif fileExists(site):
+      for line in lines(site):
+        let cleanLine = line.strip()
+        if cleanLine != "": cfg.sites.add(cleanLine)
+    else:
+      for s in site.split(','):
+        let cleanS = s.strip()
+        if cleanS != "": cfg.sites.add(cleanS)
+
+  if methodOpt != "":
+    case methodOpt.toLowerAscii()
+    of "api": cfg.runMethod = methodApi
+    of "stream": cfg.runMethod = methodDumpStream
+    of "download": cfg.runMethod = methodDumpDownload
+    of "sql": cfg.runMethod = methodSql
+    else: quit("Error: Unknown method '" & methodOpt & "'")
+
+  if allwikis: cfg.generateAllWikis = true
+  if progress: cfg.showProgress = true
+  if verbose: cfg.verbose = true
+  if genRaw: cfg.genRaw = true
+  if genArticles: cfg.genArticles = true
+  if genTsv: cfg.genTsv = true
+  if genJson: cfg.genJson = true
+
+  # Resolve -s ALL late evaluation
+  if cfg.sites.len == 1 and cfg.sites[0] == "ALL":
+    let allWikisFile = cfg.outDir / "allwikis.txt"
+    if fileExists(allWikisFile):
+      cfg.sites = @[]
+      for line in lines(allWikisFile):
+        let cleanLine = line.strip()
+        if cleanLine != "": cfg.sites.add(cleanLine)
+    elif not cfg.generateAllWikis:
+      quit("Error: -s ALL requires 'allwikis.txt' in the working directory. Run './wikiurl -a' first to generate it.")
+
+  # If they just wanted to generate the list, exit cleanly without validation
+  if cfg.generateAllWikis:
+    generateAllWikisTxt(cfg)
+    quit(0)
+
+  validateConfig(cfg)
 
   # Auto-detect method if not explicitly set
-  if config.runMethod == methodAuto:
-    if "ALL" in config.sites:
-      config.runMethod = methodDumpStream
+  if cfg.runMethod == methodAuto:
+    if cfg.domain == "ALL" or cfg.sites.len > 100:
+      cfg.runMethod = methodDumpStream
     else:
-      config.runMethod = methodApi
+      cfg.runMethod = methodApi
 
-  if config.verbose:
-    stderr.writeLine("[Verbose] Using Output Directory: " & config.outDir)
-    stderr.writeLine("[Verbose] Execution Method: " & $config.runMethod)
+  if cfg.nsList.len > 0 and (cfg.runMethod == methodDumpStream or cfg.runMethod == methodDumpDownload):
+    stderr.writeLine("[WARNING] The '-n' (namespace) filter is ignored when using the 'stream' or 'download' methods. Offline dumps lack namespace data.")
+
+  if cfg.verbose:
+    stderr.writeLine("[Verbose] Using Output Directory: " & cfg.outDir)
+    stderr.writeLine("[Verbose] Execution Method: " & $cfg.runMethod)
 
   # Route to the appropriate engine
-  case config.runMethod
-  of methodApi:
-    runApiEngine(config)
-  of methodDumpStream:
-    runDumpStreamEngine(config)
-  of methodDumpDownload:
-    runDumpDownloadEngine(config)
-  of methodSql:
-    runSqlEngine(config)
-  of methodAuto:
-    discard # Handled above
+  case cfg.runMethod
+  of methodApi: runApiEngine(cfg)
+  of methodDumpStream: runDumpStreamEngine(cfg)
+  of methodDumpDownload: runDumpDownloadEngine(cfg)
+  of methodSql: runSqlEngine(cfg)
+  of methodAuto: discard
+
 
 when isMainModule:
-  main()
+  if paramCount() == 0:
+    # If run with zero arguments, seamlessly trigger the cligen help menu
+    discard execCmd(getAppFilename() & " --help")
+    quit(0)
+
+  # Customize cligen's help table to only show Flags and Descriptions
+  clCfg.hTabCols = @[clOptKeys, clDescrip]
+
+  dispatch(executeWikiUrl, 
+    cmdName = "wikiurl", # <--- This forces the Usage line to say 'wikiurl'
+    doc = "wikiurl - list page names and URLs that contain a domain\n\nExamples:\n  ./wikiurl -d cnn.com -s simplewiki -m stream --progress --genTsv\n  ./wikiurl -d ALL -s mysites.txt --progress --genTsv",
+    help = {
+      "domain": "Domain to search for eg. cnn.com (Use 'ALL' for all domains)",
+      "site": "Site codes [comma separated] OR path to a text file list. Use 'ALL' to read from allwikis.txt (see -a)",
+      "methodOpt": "Extraction method: api, download, stream, sql",
+      "ns": "Namespace(s) to target [comma separated] eg. '0,6' (API/SQL methods only)",
+      "regex": "Only report URLs that match the given regex",
+      "config": "Path to a custom job config file to override ~/.wikiurlrc",
+      "workdir": "Working directory for output. Default is CWD.",
+      "allwikis": "Generate a fresh allwikis.txt file in the working directory (see -s ALL)",
+      "progress": "Print status messages to stderr",
+      "verbose": "Print detailed HTTP/network debug information",
+      "genTsv": "Generate a .tsv file",
+      "genJson": "Generate a .jsonl file",
+      "genArticles": "Generate a .articles file (list of page titles, API/SQL methods only)",
+      "genRaw": "Keep raw SQL/API output file"
+    },
+    short = {"domain": 'd', "site": 's', "methodOpt": 'm', "ns": 'n', "regex": 'r', "config": 'c', "workdir": 'w', "allwikis": 'a'}
+  )

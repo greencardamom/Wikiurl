@@ -37,18 +37,20 @@ Sartell, Minnesota    987  0   com.cnn.sportsillustrated.      http://sportsillu
 
 ### Pre-compiled Binaries (Recommended)
 
-If you do not want to install Nim and compile the tool from source, you can download pre-compiled binaries for Linux, macOS, and Windows.
+If you do not want to install Nim and compile the tool from source, you can download pre-compiled binaries for Linux, macOS, and Windows. 
+
+We offer two versions for each operating system:
+* **Standalone (Default):** Runs instantly out of the box. Supports the API, Stream, and Download engines.
+* **SQL Version (`-sql`):** Required *only* if you intend to use the `-m sql` engine on Toolforge. **Note:** This version requires you to have MySQL/MariaDB client libraries installed on your system.
 
 1. Navigate to the **[Releases](https://github.com/greencardamom/wikiurl/releases)** page on this repository.
 2. Under the latest release tag, expand the **Assets** section at the bottom.
-3. Download the binary that matches your operating system:
-   * `wikiurl-linux-amd64` (Linux)
-   * `wikiurl-macos-amd64` (macOS)
-   * `wikiurl-windows-amd64.exe` (Windows)
+3. Download the binary that matches your operating system and needs:
+   * **Linux:** `wikiurl-linux-amd64` (or `-sql`)
+   * **macOS (M-Series/ARM):** `wikiurl-macos-arm64` (or `-sql`)
+   * **Windows:** `wikiurl-windows-amd64.exe` (or `-sql.exe`)
 
-**Security Note:** To ensure transparency and trust, all pre-compiled binaries are built automatically with a GitHub feature 
-called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the 
-**Actions** tab at the top of this repository. 
+**Security Note:** To ensure transparency and trust, all pre-compiled binaries are built automatically with a GitHub feature called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the **Actions** tab at the top of this repository.
 
 ### Prerequisites
 

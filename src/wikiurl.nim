@@ -16,13 +16,14 @@
 
 import std/[os, parsecfg, strutils, httpclient, json, uri, algorithm, streams, osproc, re], zip/gzipfiles
 
-# Handle the standard library split introduced in Nim 2.0
-when NimMajor >= 2:
-  import db_connector/db_mysql
-else:
-  import db_mysql
-
 import cligen
+
+# Handle the standard library split introduced in Nim 2.0
+when defined(useSql):
+  when NimMajor >= 2:
+    import db_connector/db_mysql
+  else:
+    import db_mysql
 
 type
   OutputMethod = enum
@@ -538,166 +539,168 @@ proc runDumpStreamEngine(cfg: WikiUrlConfig) =
 # SQL Engine
 # -------------------------------------------------------------------------
 
-proc getReplicaCreds(cfg: WikiUrlConfig): tuple[user, pass: string] =
-  if not fileExists(cfg.replicaCnf):
-    quit("Fatal Error: Could not find replica credentials at " & cfg.replicaCnf)
+when defined(useSql):
+  proc getReplicaCreds(cfg: WikiUrlConfig): tuple[user, pass: string] =
   
-  var dict = loadConfig(cfg.replicaCnf)
-  let user = dict.getSectionValue("client", "user")
-  let pass = dict.getSectionValue("client", "password")
+    if not fileExists(cfg.replicaCnf):
+      quit("Fatal Error: Could not find replica credentials at " & cfg.replicaCnf)
   
-  if user == "" or pass == "":
-    quit("Fatal Error: Could not parse user/password from " & cfg.replicaCnf)
+    var dict = loadConfig(cfg.replicaCnf)
+    let user = dict.getSectionValue("client", "user")
+    let pass = dict.getSectionValue("client", "password")
+  
+    if user == "" or pass == "":
+      quit("Fatal Error: Could not parse user/password from " & cfg.replicaCnf)
     
-  return (user, pass)
+    return (user, pass)
 
-proc runSqlEngine(cfg: WikiUrlConfig) =
-  if cfg.showProgress:
-    stderr.writeLine("[Engine] Starting Toolforge SQL Engine (via SSH Tunnel)...")
-
-  let creds = getReplicaCreds(cfg)
-  let targetRevDomain = reverseDomainArg(cfg.domain)
-  var currentLocalPort = 4711 # Increment per loop to avoid TIME_WAIT collisions
-
-  for site in cfg.sites:
+  proc runSqlEngine(cfg: WikiUrlConfig) =
     if cfg.showProgress:
-      stderr.writeLine("[SQL] Establishing SSH tunnel to Toolforge for " & site & "...")
+      stderr.writeLine("[Engine] Starting Toolforge SQL Engine (via SSH Tunnel)...")
 
-    let dbHost = site & ".analytics.db.svc.wikimedia.cloud"
-    let dbName = site & "_p"
-    let localPort = $currentLocalPort
-    currentLocalPort += 1
+    let creds = getReplicaCreds(cfg)
+    let targetRevDomain = reverseDomainArg(cfg.domain)
+    var currentLocalPort = 4711 # Increment per loop to avoid TIME_WAIT collisions
 
-    when defined(windows):
-      # Native Windows OpenSSH lacks ControlMaster multiplexing support
-      # We launch it as a tracked background process instead
-      var sshProc: Process
-      try:
-        sshProc = startProcess("ssh", args = ["-N", "-L", localPort & ":" & dbHost & ":3306", "login.toolforge.org"], options = {poUsePath})
-        if cfg.showProgress:
-          stderr.writeLine("[SQL] Waiting 3 seconds for Windows SSH tunnel to establish...")
-        sleep(3000)
-      except CatchableError:
-        stderr.writeLine("[SQL] Failed to launch SSH process. Is OpenSSH installed?")
-        continue
+    for site in cfg.sites:
+      if cfg.showProgress:
+        stderr.writeLine("[SQL] Establishing SSH tunnel to Toolforge for " & site & "...")
+
+      let dbHost = site & ".analytics.db.svc.wikimedia.cloud"
+      let dbName = site & "_p"
+      let localPort = $currentLocalPort
+      currentLocalPort += 1
+
+      when defined(windows):
+        # Native Windows OpenSSH lacks ControlMaster multiplexing support
+        # We launch it as a tracked background process instead
+        var sshProc: Process
+        try:
+          sshProc = startProcess("ssh", args = ["-N", "-L", localPort & ":" & dbHost & ":3306", "login.toolforge.org"], options = {poUsePath})
+          if cfg.showProgress:
+            stderr.writeLine("[SQL] Waiting 3 seconds for Windows SSH tunnel to establish...")
+          sleep(3000)
+        except CatchableError:
+          stderr.writeLine("[SQL] Failed to launch SSH process. Is OpenSSH installed?")
+          continue
         
-      defer:
-        if cfg.showProgress: stderr.writeLine("[SQL] Closing SSH tunnel...")
-        if sshProc != nil:
-          sshProc.terminate()
-          sshProc.close()
-    else:
-      # POSIX (Linux/macOS/WSL) uses reliable SSH multiplexing sockets
-      let tunnelSock = getTempDir() / ("wikiurl_tunnel_" & site & ".sock")
-      let sshStartCmd = "ssh -N -f -M -S " & tunnelSock & " -L " & localPort & ":" & dbHost & ":3306 login.toolforge.org"
-      
-      if execCmd(sshStartCmd) != 0:
-        stderr.writeLine("[SQL] Failed to establish SSH tunnel. Ensure your SSH config/keys are set up for login.toolforge.org")
-        continue
-
-      defer:
-        if cfg.showProgress: stderr.writeLine("[SQL] Closing SSH tunnel...")
-        discard execCmd("ssh -S " & tunnelSock & " -O exit login.toolforge.org > /dev/null 2>&1")
-
-    # Connect natively through the tunnel to the replica
-    var db: DbConn
-    try:
-      # Nim's db_mysql allows host:port format in the connection string
-      db = open("127.0.0.1:" & localPort, creds.user, creds.pass, dbName)
-    except CatchableError:
-      stderr.writeLine("[SQL] Failed to connect to local tunnel port " & localPort)
-      continue
-      
-    defer: db.close()
-
-    let prefix = if cfg.domain == "ALL": "adn" else: cfg.domain
-    let baseName = cfg.outDir / (prefix & "." & site & ".sql")
-    
-    var fJson, fTsv: File
-    
-    if cfg.genJson: fJson = open(baseName & ".jsonl", fmWrite)
-    if cfg.genTsv: fTsv = open(baseName & ".tsv", fmWrite)
-
-    defer:
-      if cfg.genJson: fJson.close()
-      if cfg.genTsv: fTsv.close()
-
-    if cfg.genRaw or cfg.genArticles:
-      stderr.writeLine("[SQL] Note: --genRaw and --genArticles are ignored in SQL mode.")
-
-    if cfg.showProgress:
-      stderr.writeLine("[SQL] Executing indexed query for " & cfg.domain & "...")
-
-    try:
-      var nsFilter = ""
-      if cfg.nsList.len > 0:
-        nsFilter = " AND p.page_namespace IN (" & cfg.nsList.join(",") & ")"
-
-      if cfg.domain == "ALL":
-        # The URLS-ALL equivalent: Massive firehose dump with JOIN
-        let whereClause = if nsFilter != "": " WHERE 1=1" & nsFilter else: ""
-        let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from" & whereClause
-        for row in db.fastRows(sql(queryStr)):
-          let pageId = row[0]
-          let ns = row[1]
-          let title = row[2].replace("_", " ")
-          let rawRevDomain = row[3]
-          let properDomain = unreverseDomain(rawRevDomain)
-          let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
-          let fullUrl = properDomain & row[4]
-          
-          if cfg.regex != "":
-            if fullUrl.find(cfg.compiledRegex) == -1:
-              continue
-              
-          if cfg.genTsv:
-            fTsv.writeLine(title & "\t" & pageId & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
-            
-          if cfg.genJson:
-            let line = %*{
-              "title": title,
-              "page_id": parseInt(pageId),
-              "namespace": parseInt(ns),
-              "domain": cleanRevDomain,
-              "url": fullUrl
-            }
-            fJson.writeLine($line)
-            
+        defer:
+          if cfg.showProgress: stderr.writeLine("[SQL] Closing SSH tunnel...")
+          if sshProc != nil:
+            sshProc.terminate()
+            sshProc.close()
       else:
-        # The specific domain search with JOIN
-        let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE 'http://" & targetRevDomain & "%' OR el.el_to_domain_index LIKE 'https://" & targetRevDomain & "%')" & nsFilter
-        for row in db.fastRows(sql(queryStr)):
-          let pageId = row[0]
-          let ns = row[1]
-          let title = row[2].replace("_", " ")
-          let rawRevDomain = row[3]
-          let properDomain = unreverseDomain(rawRevDomain)
-          let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
-          let fullUrl = properDomain & row[4]
+        # POSIX (Linux/macOS/WSL) uses reliable SSH multiplexing sockets
+        let tunnelSock = getTempDir() / ("wikiurl_tunnel_" & site & ".sock")
+        let sshStartCmd = "ssh -N -f -M -S " & tunnelSock & " -L " & localPort & ":" & dbHost & ":3306 login.toolforge.org"
+      
+        if execCmd(sshStartCmd) != 0:
+          stderr.writeLine("[SQL] Failed to establish SSH tunnel. Ensure your SSH config/keys are set up for login.toolforge.org")
+          continue
+
+        defer:
+          if cfg.showProgress: stderr.writeLine("[SQL] Closing SSH tunnel...")
+          discard execCmd("ssh -S " & tunnelSock & " -O exit login.toolforge.org > /dev/null 2>&1")
+
+      # Connect natively through the tunnel to the replica
+      var db: DbConn
+      try:
+        # Nim's db_mysql allows host:port format in the connection string
+        db = open("127.0.0.1:" & localPort, creds.user, creds.pass, dbName)
+      except CatchableError:
+        stderr.writeLine("[SQL] Failed to connect to local tunnel port " & localPort)
+        continue
+      
+      defer: db.close()
+
+      let prefix = if cfg.domain == "ALL": "adn" else: cfg.domain
+      let baseName = cfg.outDir / (prefix & "." & site & ".sql")
+    
+      var fJson, fTsv: File
+    
+      if cfg.genJson: fJson = open(baseName & ".jsonl", fmWrite)
+      if cfg.genTsv: fTsv = open(baseName & ".tsv", fmWrite)
+
+      defer:
+        if cfg.genJson: fJson.close()
+        if cfg.genTsv: fTsv.close()
+
+      if cfg.genRaw or cfg.genArticles:
+        stderr.writeLine("[SQL] Note: --genRaw and --genArticles are ignored in SQL mode.")
+
+      if cfg.showProgress:
+        stderr.writeLine("[SQL] Executing indexed query for " & cfg.domain & "...")
+
+      try:
+        var nsFilter = ""
+        if cfg.nsList.len > 0:
+          nsFilter = " AND p.page_namespace IN (" & cfg.nsList.join(",") & ")"
+
+        if cfg.domain == "ALL":
+          # The URLS-ALL equivalent: Massive firehose dump with JOIN
+          let whereClause = if nsFilter != "": " WHERE 1=1" & nsFilter else: ""
+          let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from" & whereClause
+          for row in db.fastRows(sql(queryStr)):
+            let pageId = row[0]
+            let ns = row[1]
+            let title = row[2].replace("_", " ")
+            let rawRevDomain = row[3]
+            let properDomain = unreverseDomain(rawRevDomain)
+            let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
+            let fullUrl = properDomain & row[4]
           
-          if cfg.regex != "":
-            if fullUrl.find(cfg.compiledRegex) == -1:
-              continue
+            if cfg.regex != "":
+              if fullUrl.find(cfg.compiledRegex) == -1:
+                continue
               
-          if cfg.genTsv:
-            fTsv.writeLine(title & "\t" & pageId & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
+            if cfg.genTsv:
+              fTsv.writeLine(title & "\t" & pageId & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
             
-          if cfg.genJson:
-            let line = %*{
-              "title": title,
-              "page_id": parseInt(pageId),
-              "namespace": parseInt(ns),
-              "domain": cleanRevDomain,
-              "url": fullUrl
-            }
-            fJson.writeLine($line)
+            if cfg.genJson:
+              let line = %*{
+                "title": title,
+                "page_id": parseInt(pageId),
+                "namespace": parseInt(ns),
+                "domain": cleanRevDomain,
+                "url": fullUrl
+              }
+              fJson.writeLine($line)
+            
+        else:
+          # The specific domain search with JOIN
+          let queryStr = "SELECT p.page_id, p.page_namespace, p.page_title, el.el_to_domain_index, el.el_to_path FROM externallinks el JOIN page p ON p.page_id = el.el_from WHERE (el.el_to_domain_index LIKE 'http://" & targetRevDomain & "%' OR el.el_to_domain_index LIKE 'https://" & targetRevDomain & "%')" & nsFilter
+          for row in db.fastRows(sql(queryStr)):
+            let pageId = row[0]
+            let ns = row[1]
+            let title = row[2].replace("_", " ")
+            let rawRevDomain = row[3]
+            let properDomain = unreverseDomain(rawRevDomain)
+            let cleanRevDomain = stripSchemeFromIndex(rawRevDomain)
+            let fullUrl = properDomain & row[4]
+          
+            if cfg.regex != "":
+              if fullUrl.find(cfg.compiledRegex) == -1:
+                continue
+              
+            if cfg.genTsv:
+              fTsv.writeLine(title & "\t" & pageId & "\t" & ns & "\t" & cleanRevDomain & "\t" & fullUrl)
+            
+            if cfg.genJson:
+              let line = %*{
+                "title": title,
+                "page_id": parseInt(pageId),
+                "namespace": parseInt(ns),
+                "domain": cleanRevDomain,
+                "url": fullUrl
+              }
+              fJson.writeLine($line)
 
-    except CatchableError:
-      let errMsg = getCurrentExceptionMsg()
-      stderr.writeLine("[SQL] Query failed: " & errMsg)
+      except CatchableError:
+        let errMsg = getCurrentExceptionMsg()
+        stderr.writeLine("[SQL] Query failed: " & errMsg)
 
-    if cfg.showProgress:
-      stderr.writeLine("[SQL] Finished processing " & site)
+      if cfg.showProgress:
+        stderr.writeLine("[SQL] Finished processing " & site)
 
 # -------------------------------------------------------------------------
 # Main Execution Routing
@@ -812,7 +815,11 @@ proc executeWikiUrl(domain: string = "", site: string = "", methodOpt: string = 
   of methodApi: runApiEngine(cfg)
   of methodDumpStream: runDumpStreamEngine(cfg)
   of methodDumpDownload: runDumpDownloadEngine(cfg)
-  of methodSql: runSqlEngine(cfg)
+  of methodSql: 
+    when defined(useSql):
+      runSqlEngine(cfg)
+    else:
+      quit("Error: This binary was compiled without SQL support. Use '-m api', '-m stream', or download the '-sql' release binary.")
   of methodAuto: discard
 
 

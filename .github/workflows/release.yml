@@ -11,7 +11,6 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     
-    # The Matrix: This spins up 3 different VMs and assigns variables to each
     strategy:
       matrix:
         include:
@@ -20,7 +19,7 @@ jobs:
             release_name: wikiurl-linux-amd64
           - os: macos-latest
             bin_ext: ""
-            release_name: wikiurl-macos-amd64
+            release_name: wikiurl-macos-arm64 # Updated to reflect modern Mac runners
           - os: windows-latest
             bin_ext: ".exe"
             release_name: wikiurl-windows-amd64.exe
@@ -34,7 +33,6 @@ jobs:
         with:
           nim-version: 'stable'
 
-      # OS-Specific Dependency Installation
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
         run: |
@@ -45,26 +43,40 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install mysql-client
 
-      # Cross-platform Nimble package installation
       - name: Install Nimble packages
         run: nimble install -y cligen db_connector zip 
 
-      - name: Build binary
+      # 1. Build the Standalone version (No MySQL dependencies)
+      - name: Build Standalone binary
         run: nim c -d:ssl -d:release --outdir:. src/wikiurl.nim
 
-      # Rename the binary (Unix relies on 'mv', Windows PowerShell uses 'Rename-Item')
-      - name: Rename binary for release (Linux/macOS)
+      # 2. Build the SQL-enabled version
+      - name: Build SQL binary
+        run: nim c -d:ssl -d:release -d:useSql -o:wikiurl-sql${{ matrix.bin_ext }} src/wikiurl.nim
+
+      # Rename the Standalone binary
+      - name: Rename Standalone binary (Linux/macOS)
         if: runner.os != 'Windows'
         run: mv wikiurl${{ matrix.bin_ext }} ${{ matrix.release_name }}
 
-      - name: Rename binary for release (Windows)
+      - name: Rename Standalone binary (Windows)
         if: runner.os == 'Windows'
         run: Rename-Item -Path "wikiurl${{ matrix.bin_ext }}" -NewName "${{ matrix.release_name }}"
 
-      # Upload to GitHub Releases
-      - name: Upload Release Asset
+      # Rename the SQL binary
+      - name: Rename SQL binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: mv wikiurl-sql${{ matrix.bin_ext }} ${{ matrix.release_name }}-sql
+
+      - name: Rename SQL binary (Windows)
+        if: runner.os == 'Windows'
+        run: Rename-Item -Path "wikiurl-sql${{ matrix.bin_ext }}" -NewName "${{ matrix.release_name }}-sql.exe"
+
+      # Upload all binaries to GitHub Releases
+      - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.release_name }}
+          files: |
+            ${{ matrix.release_name }}*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

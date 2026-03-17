@@ -32,6 +32,7 @@ type
   # The master configuration object that holds our merged state
   WikiUrlConfig = object
     userId: string
+    email: string
     emailFile: string
     replicaCnf: string
     outDir: string
@@ -63,10 +64,12 @@ proc loadConfigFile(filePath: string, cfg: var WikiUrlConfig) =
   var dict = loadConfig(filePath)
   
   let parsedUser = dict.getSectionValue("Identity", "userid")
-  let parsedEmail = dict.getSectionValue("Identity", "email_file")
+  let parsedEmailFile = dict.getSectionValue("Identity", "email_file")
+  let parsedEmailInline = dict.getSectionValue("Identity", "email")
   
   if parsedUser != "": cfg.userId = parsedUser
-  if parsedEmail != "": cfg.emailFile = parsedEmail
+  if parsedEmailFile != "": cfg.emailFile = parsedEmailFile
+  if parsedEmailInline != "": cfg.email = parsedEmailInline
     
   if dict.getSectionValue("Authentication", "replica_cnf") != "":
     cfg.replicaCnf = dict.getSectionValue("Authentication", "replica_cnf")
@@ -88,23 +91,25 @@ proc validateConfig(cfg: WikiUrlConfig) =
     quit("Error: Target domain (-d) is required.")
   if cfg.sites.len == 0:
     quit("Error: Target site (-s) is required.")
-  if cfg.userId == "" or cfg.emailFile == "":
-    quit("Error: WMF User-Agent requirements not met. Please define 'userid' and 'email_file' in ~/.wikiurlrc")
+  if cfg.userId == "" or (cfg.email == "" and cfg.emailFile == ""):
+    quit("Error: WMF User-Agent requirements not met. Please define 'userid' and either 'email' or 'email_file' in ~/.wikiurlrc")
 
 # -------------------------------------------------------------------------
 # Shared Engine Helpers
 # -------------------------------------------------------------------------
 
 proc buildUserAgent(cfg: WikiUrlConfig): string =
-  # Safely read the email from the secrets file
-  var email = "unknown@example.com"
-  if fileExists(cfg.emailFile):
-    email = readFile(cfg.emailFile).strip()
+  var resolvedEmail = "unknown@example.com"
+  
+  if cfg.email != "":
+    resolvedEmail = cfg.email.strip()
+  elif cfg.emailFile != "" and fileExists(cfg.emailFile):
+    resolvedEmail = readFile(cfg.emailFile).strip()
   else:
-    quit("Error: Could not read email file at " & cfg.emailFile)
+    quit("Error: Could not resolve email. Please set 'email' in ~/.wikiurlrc or ensure 'email_file' points to a valid file.")
     
   # Format: wikiurl/1.0 (https://github.com/greencardamom/wikiurl; User:GreenC; mailto:email@example.com)
-  return "wikiurl/1.0 (https://github.com/greencardamom/wikiurl; " & cfg.userId & "; mailto:" & email & ")"
+  return "wikiurl/1.0 (https://github.com/greencardamom/wikiurl; " & cfg.userId & "; mailto:" & resolvedEmail & ")"
 
 proc generateAllWikisTxt(cfg: WikiUrlConfig) =
   let outPath = cfg.outDir / "allwikis.txt"

@@ -47,7 +47,8 @@ We offer two versions for each operating system:
 2. Under the latest release tag, expand the **Assets** section at the bottom.
 3. Download the binary that matches your operating system and needs:
    * **Linux:** `wikiurl-linux-amd64` (or `-sql`)
-   * **macOS (M-Series/ARM):** `wikiurl-macos-arm64` (or `-sql`)
+   * **macOS (M-Series / Apple Silicon):** `wikiurl-macos-arm64` (or `-sql`)
+   * **macOS (Older Intel Macs):** `wikiurl-macos-amd64` (or `-sql`)
    * **Windows:** `wikiurl-windows-amd64.exe` (or `-sql.exe`)
 
 **Security Note:** To ensure transparency and trust, all pre-compiled binaries are built automatically with a GitHub feature called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the **Actions** tab at the top of this repository.

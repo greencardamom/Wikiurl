@@ -11,15 +11,18 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     
-    strategy:
+strategy:
       matrix:
         include:
           - os: ubuntu-latest
             bin_ext: ""
             release_name: wikiurl-linux-amd64
-          - os: macos-latest
+          - os: macos-latest # Apple Silicon (ARM64) runner
             bin_ext: ""
-            release_name: wikiurl-macos-arm64 # Updated to reflect modern Mac runners
+            release_name: wikiurl-macos-arm64
+          - os: macos-13 # Intel (x86_64) runner
+            bin_ext: ""
+            release_name: wikiurl-macos-amd64
           - os: windows-latest
             bin_ext: ".exe"
             release_name: wikiurl-windows-amd64.exe

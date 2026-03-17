@@ -41,7 +41,7 @@ If you do not want to install Nim and compile the tool from source, you can down
 
 We offer two versions for each operating system:
 * **Standalone (Default):** Runs instantly out of the box. Supports the API, Stream, and Download engines.
-* **SQL Version (`-sql`):** Required *only* if you intend to use the `-m sql` engine on Toolforge. **Note:** This version requires you to have MySQL/MariaDB client libraries installed on your system.
+* **SQL Version (`-sql`):** Required *only* if you intend to use the `-m sql` engine tunneled through Toolforge. **Note:** This version requires you to have MySQL/MariaDB client libraries installed on your system, Toolforge access, and ssh keys.
 
 1. Navigate to the **[Releases](https://github.com/greencardamom/wikiurl/releases)** page on this repository.
 2. Under the latest release tag, expand the **Assets** section at the bottom.

@@ -95,7 +95,7 @@ userid = "User:WikiUser"
 email = "your.email@example.com"
 
 # Alternatively, point to a file with a single line containing your email to keep it out of the config:
-# email_file = "/path/to/a/text/file/containing/your/email.txt"
+#     email_file = "/path/to/a/text/file/containing/your/email.txt"
 # Windows Path Note: Because the values are double-quoted, you must either use forward slashes or double backslashes for your file paths so they are parsed correctly. 
 # example: "C:/Users/Name/email.txt"` or `"C:\\Users\\Name\\email.txt"`
 

@@ -92,18 +92,17 @@ Create a file in your home directory (`~/.wikiurlrc` on Linux/macOS, or `C:\User
 ```ini
 [Identity]
 userid = "User:WikiUser"
-email_file = "/path/to/a/text/file/containing/your/email.txt"
+email = "your.email@example.com"
+
+# Alternatively, point to a file with a single line containing your email to keep it out of the config:
+# email_file = "/path/to/a/text/file/containing/your/email.txt"
+# Windows Path Note: Because the values are double-quoted, you must either use forward slashes or double backslashes for your file paths so they are parsed correctly. 
+# example: "C:/Users/Name/email.txt"` or `"C:\\Users\\Name\\email.txt"`
 
 [Defaults]
 # Optional: Set a default working directory
 # output_dir = "/tmp/wikiurl_output"
 ```
-
-*Note: The `email_file` should be a plain text file containing only your email address. This prevents hardcoding your email directly into configuration files. All values are surrounded by double-quote.*
-
-**Windows Path Note:** Because the values are double-quoted, you must either use forward slashes or double backslashes for your file paths so they are parsed correctly. 
-* Good: `"C:/Users/Name/email.txt"` or `"C:\\Users\\Name\\email.txt"`
-* Bad: `"C:\Users\Name\email.txt"`
 
 ### Toolforge SQL Configuration (Optional)
 If you intend to use the `-m sql` method, add your replica credentials to the config. The file `replica.my.cnf` is available in your Toolforge shell account. You will also need passwordless-ssh setup on Toolforge.

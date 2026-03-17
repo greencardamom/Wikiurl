@@ -186,6 +186,11 @@ cd testsuite
 
 Because this is an open-source tool not signed with a paid Apple Developer certificate, macOS will flag the binary when you first download it and prevent it from running. 
 
-If it does not work try this:
+Try:
 
-`codesign -s - --force ./wikiurl-macos-amd64`
+`xattr -d com.apple.quarantine wikiurl-macos-arm64`
+
+If it does not work you can try:
+
+`codesign -s - --force ./wikiurl-macos-arm64`
+

@@ -186,10 +186,6 @@ cd testsuite
 
 Because this is an open-source tool not signed with a paid Apple Developer certificate, macOS will flag the binary when you first download it and prevent it from running. 
 
-To clear the Apple quarantine flag and allow the tool to run, open your terminal and run this command on the downloaded file:
-
-`xattr -d com.apple.quarantine wikiurl-macos-amd64`
-
-If it still does not work try this:
+If it does not work try this:
 
 `codesign -s - --force ./wikiurl-macos-amd64`

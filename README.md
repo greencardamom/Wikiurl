@@ -51,7 +51,7 @@ We offer two versions for each operating system:
    * **macOS (Older Intel Macs):** `wikiurl-macos-amd64` (or `-sql`)
    * **Windows:** `wikiurl-windows-amd64.exe` (or `-sql.exe`)
 
-**Security Note:** To ensure transparency and trust, all pre-compiled binaries are built automatically with a GitHub feature called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the **Actions** tab at the top of this repository.
+**Security Note:** To ensure transparency and trust, all pre-compiled binaries are built automatically on GitHub with a feature called Workflow. *No binaries are uploaded from personal machines.* You can verify GitHub's compile log by clicking the **Actions** tab at the top of this repository.
 
 ### Prerequisites
 
